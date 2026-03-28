@@ -3,16 +3,18 @@ MiroFish Backend - Flask Application Factory
 """
 
 import os
+import traceback
 import warnings
 
 # Suppress multiprocessing resource_tracker warnings (from third-party libraries like transformers)
 # Must be set before all other imports
 warnings.filterwarnings("ignore", message=".*resource_tracker.*")
 
-from flask import Flask, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from .config import Config
+from .middleware import check_api_key, check_rate_limit
 from .utils.logger import setup_logger, get_logger
 
 
@@ -39,8 +41,13 @@ def create_app(config_class=Config):
         logger.info("MiroFish-Offline Backend starting...")
         logger.info("=" * 50)
 
-    # Enable CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # Enable CORS with restricted origins
+    origins = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:3001').split(',')
+    CORS(app, resources={r"/api/*": {
+        "origins": origins,
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "X-API-Key"]
+    }})
 
     # --- Initialize Neo4jStorage singleton (DI via app.extensions) ---
     from .storage import Neo4jStorage
@@ -73,6 +80,23 @@ def create_app(config_class=Config):
         logger = get_logger('mirofish.request')
         logger.debug(f"Response: {response.status_code}")
         return response
+
+    # --- Security middleware ---
+    # API key authentication (skipped if MIROFISH_API_KEY is not set)
+    app.before_request(check_api_key)
+
+    # Rate limiting
+    app.before_request(check_rate_limit)
+
+    # Global error handler - hide tracebacks in production
+    @app.errorhandler(Exception)
+    def handle_error(e):
+        if app.debug:
+            return jsonify({"success": False, "error": str(e), "traceback": traceback.format_exc()}), 500
+        else:
+            logger = get_logger('mirofish')
+            logger.exception("Unhandled error")
+            return jsonify({"success": False, "error": "Internal server error"}), 500
 
     # Register blueprints
     from .api import graph_bp, simulation_bp, report_bp
