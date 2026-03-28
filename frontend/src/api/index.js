@@ -2,7 +2,8 @@ import axios from 'axios'
 
 // Create axios instance
 const service = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001',
+  // Use relative URL to work with Vite proxy for both localhost and LAN access
+  baseURL: '/api',
   timeout: 300000, // 5 minute timeout (ontology generation may require longer time)
   headers: {
     'Content-Type': 'application/json'
