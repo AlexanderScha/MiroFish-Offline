@@ -50,6 +50,12 @@ CREATE FULLTEXT INDEX fact_fulltext IF NOT EXISTS
 FOR ()-[r:RELATION]-() ON EACH [r.fact, r.name]
 """
 
+# Agent memory constraint (for persistent agent memory across simulation rounds)
+CREATE_AGENT_MEMORY_INDEX = """
+CREATE INDEX agent_memory_lookup IF NOT EXISTS
+FOR (m:AgentMemory) ON (m.simulation_id, m.agent_id)
+"""
+
 # All schema queries to run on startup
 ALL_SCHEMA_QUERIES = [
     CREATE_GRAPH_UUID_CONSTRAINT,
@@ -59,4 +65,5 @@ ALL_SCHEMA_QUERIES = [
     CREATE_RELATION_VECTOR_INDEX,
     CREATE_ENTITY_FULLTEXT_INDEX,
     CREATE_FACT_FULLTEXT_INDEX,
+    CREATE_AGENT_MEMORY_INDEX,
 ]

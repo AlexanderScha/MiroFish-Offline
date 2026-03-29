@@ -173,6 +173,17 @@ except ImportError as e:
     print("Please install first: pip install oasis-ai camel-ai")
     sys.exit(1)
 
+# Agent memory persistence (optional — gracefully degrades if Neo4j unavailable)
+_memory_service = None
+try:
+    from app.storage.neo4j_storage import Neo4jStorage
+    from app.services.agent_memory_persistence import AgentMemoryService
+    _neo4j_storage = Neo4jStorage()
+    _memory_service = AgentMemoryService(storage=_neo4j_storage)
+    print("[Memory] Agent memory persistence enabled")
+except Exception as e:
+    print(f"[Memory] Agent memory persistence unavailable (non-fatal): {e}")
+
 
 # Twitter available actions (INTERVIEW not included, INTERVIEW can only be triggered manually via ManualAction)
 TWITTER_ACTIONS = [
@@ -1223,42 +1234,59 @@ async def run_twitter_simulation(
         if total_rounds < original_rounds:
             log_info(f"Rounds truncated: {original_rounds} -> {total_rounds} (max_rounds={max_rounds})")
     
+    # Collect agent personas for memory summarization
+    agent_personas = {}
+    if _memory_service:
+        for agent_id, agent in result.agent_graph.get_agents():
+            sys_msg = getattr(agent, 'system_message', None)
+            if sys_msg and hasattr(sys_msg, 'content'):
+                agent_personas[agent_id] = (sys_msg.content or "")[:500]
+
+    simulation_id = config.get("simulation_id", "")
     start_time = datetime.now()
-    
+
     for round_num in range(total_rounds):
         # Check if received exit signal
         if _shutdown_event and _shutdown_event.is_set():
             if main_logger:
                 main_logger.info(f"Received exit signal，at round {round_num + 1} stop simulation")
             break
-        
+
         simulated_minutes = round_num * minutes_per_round
         simulated_hour = (simulated_minutes // 60) % 24
         simulated_day = simulated_minutes // (60 * 24) + 1
-        
+
         active_agents = get_active_agents_for_round(
             result.env, config, simulated_hour, round_num
         )
-        
+
         # Log round start regardless of active agents
         if action_logger:
             action_logger.log_round_start(round_num + 1, simulated_hour)
-        
+
         if not active_agents:
             # Log round end even without active agents (actions_count=0)
             if action_logger:
                 action_logger.log_round_end(round_num + 1, 0)
             continue
-        
+
+        # Inject accumulated memories into active agents before they act
+        if _memory_service and simulation_id:
+            try:
+                _memory_service.inject_memories_into_agents(simulation_id, active_agents)
+            except Exception as e:
+                logging.warning(f"[Twitter] Memory injection failed (non-fatal): {e}")
+
         actions = {agent: LLMAction() for _, agent in active_agents}
         await result.env.step(actions)
-        
+
         # Get actual executed actions from Database and log
         actual_actions, last_rowid = fetch_new_actions_from_db(
             db_path, last_rowid, agent_names
         )
-        
+
         round_action_count = 0
+        round_agent_actions = {}  # {agent_id: [action_dicts]} for memory saving
         for action_data in actual_actions:
             if action_logger:
                 action_logger.log_action(
@@ -1270,23 +1298,42 @@ async def run_twitter_simulation(
                 )
                 total_actions += 1
                 round_action_count += 1
-        
+
+            # Collect for memory persistence
+            aid = action_data['agent_id']
+            if aid not in round_agent_actions:
+                round_agent_actions[aid] = []
+            round_agent_actions[aid].append(action_data)
+
+        # Save agent memories after round (only for agents that acted)
+        if _memory_service and simulation_id and round_agent_actions:
+            try:
+                _memory_service.save_round_memories(
+                    simulation_id=simulation_id,
+                    round_num=round_num + 1,
+                    agent_actions=round_agent_actions,
+                    agent_names=agent_names,
+                    agent_personas=agent_personas,
+                )
+            except Exception as e:
+                logging.warning(f"[Twitter] Memory save failed (non-fatal): {e}")
+
         if action_logger:
             action_logger.log_round_end(round_num + 1, round_action_count)
-        
+
         if (round_num + 1) % 20 == 0:
             progress = (round_num + 1) / total_rounds * 100
             log_info(f"Day {simulated_day}, {simulated_hour:02d}:00 - Round {round_num + 1}/{total_rounds} ({progress:.1f}%)")
-    
+
     # Note: Do not close environment, keep for Interview use
-    
+
     if action_logger:
         action_logger.log_simulation_end(total_rounds, total_actions)
-    
+
     result.total_actions = total_actions
     elapsed = (datetime.now() - start_time).total_seconds()
     log_info(f"Simulation loop completed! Time taken: {elapsed:.1f}seconds, Total actions: {total_actions}")
-    
+
     return result
 
 
@@ -1409,55 +1456,73 @@ async def run_reddit_simulation(
     if action_logger:
         action_logger.log_round_end(0, initial_action_count)
     
+    # Collect agent personas for memory summarization
+    agent_personas = {}
+    if _memory_service:
+        for agent_id, agent in result.agent_graph.get_agents():
+            sys_msg = getattr(agent, 'system_message', None)
+            if sys_msg and hasattr(sys_msg, 'content'):
+                agent_personas[agent_id] = (sys_msg.content or "")[:500]
+
+    simulation_id = config.get("simulation_id", "")
+
     # Main simulation loop
     time_config = config.get("time_config", {})
     total_hours = time_config.get("total_simulation_hours", 72)
     minutes_per_round = time_config.get("minutes_per_round", 30)
     total_rounds = (total_hours * 60) // minutes_per_round
-    
+
     # If maximum rounds specified, truncate
     if max_rounds is not None and max_rounds > 0:
         original_rounds = total_rounds
         total_rounds = min(total_rounds, max_rounds)
         if total_rounds < original_rounds:
             log_info(f"Rounds truncated: {original_rounds} -> {total_rounds} (max_rounds={max_rounds})")
-    
+
     start_time = datetime.now()
-    
+
     for round_num in range(total_rounds):
         # Check if received exit signal
         if _shutdown_event and _shutdown_event.is_set():
             if main_logger:
                 main_logger.info(f"Received exit signal，at round {round_num + 1} stop simulation")
             break
-        
+
         simulated_minutes = round_num * minutes_per_round
         simulated_hour = (simulated_minutes // 60) % 24
         simulated_day = simulated_minutes // (60 * 24) + 1
-        
+
         active_agents = get_active_agents_for_round(
             result.env, config, simulated_hour, round_num
         )
-        
+
         # Log round start regardless of active agents
         if action_logger:
             action_logger.log_round_start(round_num + 1, simulated_hour)
-        
+
         if not active_agents:
             # Log round end even without active agents (actions_count=0)
             if action_logger:
                 action_logger.log_round_end(round_num + 1, 0)
             continue
-        
+
+        # Inject accumulated memories into active agents before they act
+        if _memory_service and simulation_id:
+            try:
+                _memory_service.inject_memories_into_agents(simulation_id, active_agents)
+            except Exception as e:
+                logging.warning(f"[Reddit] Memory injection failed (non-fatal): {e}")
+
         actions = {agent: LLMAction() for _, agent in active_agents}
         await result.env.step(actions)
-        
+
         # Get actual executed actions from Database and log
         actual_actions, last_rowid = fetch_new_actions_from_db(
             db_path, last_rowid, agent_names
         )
-        
+
         round_action_count = 0
+        round_agent_actions = {}  # {agent_id: [action_dicts]} for memory saving
         for action_data in actual_actions:
             if action_logger:
                 action_logger.log_action(
@@ -1469,23 +1534,42 @@ async def run_reddit_simulation(
                 )
                 total_actions += 1
                 round_action_count += 1
-        
+
+            # Collect for memory persistence
+            aid = action_data['agent_id']
+            if aid not in round_agent_actions:
+                round_agent_actions[aid] = []
+            round_agent_actions[aid].append(action_data)
+
+        # Save agent memories after round (only for agents that acted)
+        if _memory_service and simulation_id and round_agent_actions:
+            try:
+                _memory_service.save_round_memories(
+                    simulation_id=simulation_id,
+                    round_num=round_num + 1,
+                    agent_actions=round_agent_actions,
+                    agent_names=agent_names,
+                    agent_personas=agent_personas,
+                )
+            except Exception as e:
+                logging.warning(f"[Reddit] Memory save failed (non-fatal): {e}")
+
         if action_logger:
             action_logger.log_round_end(round_num + 1, round_action_count)
-        
+
         if (round_num + 1) % 20 == 0:
             progress = (round_num + 1) / total_rounds * 100
             log_info(f"Day {simulated_day}, {simulated_hour:02d}:00 - Round {round_num + 1}/{total_rounds} ({progress:.1f}%)")
-    
+
     # Note: Do not close environment, keep for Interview use
-    
+
     if action_logger:
         action_logger.log_simulation_end(total_rounds, total_actions)
-    
+
     result.total_actions = total_actions
     elapsed = (datetime.now() - start_time).total_seconds()
     log_info(f"Simulation loop completed! Time taken: {elapsed:.1f}seconds, Total actions: {total_actions}")
-    
+
     return result
 
 

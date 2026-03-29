@@ -599,6 +599,66 @@ class Neo4jStorage(GraphStorage):
             return self._call_with_retry(session.execute_read, _read)
 
     # ----------------------------------------------------------------
+    # Agent Memory Persistence
+    # ----------------------------------------------------------------
+
+    def upsert_agent_memory(
+        self, simulation_id: str, agent_id: int, agent_name: str,
+        summary: str, round_num: int
+    ) -> None:
+        """Create or update an agent's memory summary for a simulation."""
+        def _write(tx):
+            tx.run(
+                """
+                MERGE (m:AgentMemory {simulation_id: $sim_id, agent_id: $agent_id})
+                SET m.agent_name = $agent_name,
+                    m.summary = $summary,
+                    m.last_round = $round_num,
+                    m.updated_at = datetime()
+                """,
+                sim_id=simulation_id,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                summary=summary,
+                round_num=round_num,
+            )
+
+        with self._driver.session() as session:
+            self._call_with_retry(session.execute_write, _write)
+
+    def get_agent_memory(self, simulation_id: str, agent_id: int) -> Optional[str]:
+        """Retrieve an agent's accumulated memory summary."""
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (m:AgentMemory {simulation_id: $sim_id, agent_id: $agent_id})
+                RETURN m.summary AS summary
+                """,
+                sim_id=simulation_id,
+                agent_id=agent_id,
+            )
+            record = result.single()
+            return record["summary"] if record else None
+
+        with self._driver.session() as session:
+            return self._call_with_retry(session.execute_read, _read)
+
+    def get_all_agent_memories(self, simulation_id: str) -> Dict[int, str]:
+        """Retrieve all agent memories for a simulation. Returns {agent_id: summary}."""
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (m:AgentMemory {simulation_id: $sim_id})
+                RETURN m.agent_id AS agent_id, m.summary AS summary
+                """,
+                sim_id=simulation_id,
+            )
+            return {record["agent_id"]: record["summary"] for record in result}
+
+        with self._driver.session() as session:
+            return self._call_with_retry(session.execute_read, _read)
+
+    # ----------------------------------------------------------------
     # Dict conversion helpers
     # ----------------------------------------------------------------
 
