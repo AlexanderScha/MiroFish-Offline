@@ -59,3 +59,6 @@ backend/uploads/
 # Docker 数据
 data/backend/venv311/
 backend/venv311/
+
+# Private strategy & business docs
+docs/private/
