@@ -224,7 +224,7 @@ class SimulationIPCClient:
         self,
         interviews: List[Dict[str, Any]],
         platform: str = None,
-        timeout: float = 120.0
+        timeout: float = 300.0
     ) -> IPCResponse:
         """
         Send batch interview command

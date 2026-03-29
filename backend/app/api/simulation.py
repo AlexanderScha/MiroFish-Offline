@@ -2313,7 +2313,7 @@ def interview_agents_batch():
         simulation_id = data.get('simulation_id')
         interviews = data.get('interviews')
         platform = data.get('platform')  # Optional：twitter/reddit/None
-        timeout = data.get('timeout', 120)
+        timeout = data.get('timeout', 300)
 
         if not simulation_id:
             return jsonify({

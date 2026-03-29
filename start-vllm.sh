@@ -42,4 +42,6 @@ python3 -m vllm.entrypoints.openai.api_server \
     --trust-remote-code \
     --no-enable-log-requests \
     --quantization awq \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
     2>&1 | tee logs/vllm.log

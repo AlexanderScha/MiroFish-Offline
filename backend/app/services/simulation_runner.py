@@ -1492,7 +1492,7 @@ class SimulationRunner:
         simulation_id: str,
         interviews: List[Dict[str, Any]],
         platform: str = None,
-        timeout: float = 120.0
+        timeout: float = 300.0
     ) -> Dict[str, Any]:
         """
         Batch interview multiple Agents
