@@ -1162,13 +1162,16 @@ async def run_twitter_simulation(
     db_path = os.path.join(simulation_dir, "twitter_simulation.db")
     if os.path.exists(db_path):
         os.remove(db_path)
-    
+
+    # Set permissive umask so OASIS-created SQLite DBs are writable by interview IPC
+    old_umask = os.umask(0o002)
     result.env = oasis.make(
         agent_graph=result.agent_graph,
         platform=oasis.DefaultPlatformType.TWITTER,
         database_path=db_path,
         semaphore=30,  # Limit maximum concurrent LLM requests to prevent API overload
     )
+    os.umask(old_umask)
     
     await result.env.reset()
     log_info("Environment started")
@@ -1389,13 +1392,16 @@ async def run_reddit_simulation(
     db_path = os.path.join(simulation_dir, "reddit_simulation.db")
     if os.path.exists(db_path):
         os.remove(db_path)
-    
+
+    # Set permissive umask so OASIS-created SQLite DBs are writable by interview IPC
+    old_umask = os.umask(0o002)
     result.env = oasis.make(
         agent_graph=result.agent_graph,
         platform=oasis.DefaultPlatformType.REDDIT,
         database_path=db_path,
         semaphore=30,  # Limit maximum concurrent LLM requests to prevent API overload
     )
+    os.umask(old_umask)
     
     await result.env.reset()
     log_info("Environment started")
