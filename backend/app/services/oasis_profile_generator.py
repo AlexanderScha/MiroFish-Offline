@@ -205,7 +205,8 @@ class OasisProfileGenerator:
         self,
         entity: EntityNode,
         user_id: int,
-        use_llm: bool = True
+        use_llm: bool = True,
+        archetype_key: Optional[str] = None
     ) -> OasisAgentProfile:
         """
         Generate OASIS Agent Profile from knowledge graph entity
@@ -214,6 +215,7 @@ class OasisProfileGenerator:
             entity: Knowledge graph entity node
             user_id: User ID (for OASIS)
             use_llm: Whether to use LLM to generate detailed persona
+            archetype_key: Optional archetype to apply (e.g., "aggressive_trader")
 
         Returns:
             OasisAgentProfile
@@ -226,7 +228,7 @@ class OasisProfileGenerator:
 
         # Build context information
         context = self._build_entity_context(entity)
-        
+
         if use_llm:
             # Use LLM to generate detailed persona
             profile_data = self._generate_profile_with_llm(
@@ -234,7 +236,8 @@ class OasisProfileGenerator:
                 entity_type=entity_type,
                 entity_summary=entity.summary,
                 entity_attributes=entity.attributes,
-                context=context
+                context=context,
+                archetype_key=archetype_key
             )
         else:
             # Use rules to generate basic persona
@@ -444,7 +447,8 @@ class OasisProfileGenerator:
         entity_type: str,
         entity_summary: str,
         entity_attributes: Dict[str, Any],
-        context: str
+        context: str,
+        archetype_key: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Use LLM to generate very detailed persona
@@ -452,6 +456,9 @@ class OasisProfileGenerator:
         Based on entity type:
         - Individual entities: generate specific character profiles
         - Group/institutional entities: generate representative account profiles
+
+        If archetype_key is provided, injects archetype behavioral instructions
+        into the prompt and uses archetype defaults for age, MBTI, etc.
         """
 
         is_individual = self._is_individual_entity(entity_type)
@@ -464,6 +471,16 @@ class OasisProfileGenerator:
             prompt = self._build_group_persona_prompt(
                 entity_name, entity_type, entity_summary, entity_attributes, context
             )
+
+        # Inject archetype instructions if provided
+        archetype_defaults = {}
+        if archetype_key:
+            from .archetypes import ArchetypeManager
+            modifier = ArchetypeManager.get_prompt_modifier(archetype_key)
+            if modifier:
+                prompt += modifier
+                archetype_defaults = ArchetypeManager.get_archetype_defaults(archetype_key)
+                logger.info(f"Applied archetype '{archetype_key}' to {entity_name}")
 
         # Try multiple times until successful or max retry attempts reached
         max_attempts = 3
@@ -499,6 +516,15 @@ class OasisProfileGenerator:
                         result["bio"] = entity_summary[:200] if entity_summary else f"{entity_type}: {entity_name}"
                     if "persona" not in result or not result["persona"]:
                         result["persona"] = entity_summary or f"{entity_name} is a {entity_type}."
+
+                    # Apply archetype defaults (override LLM values if archetype specified)
+                    if archetype_defaults:
+                        result.setdefault("age", archetype_defaults.get("age"))
+                        result.setdefault("mbti", archetype_defaults.get("mbti"))
+                        # Store archetype metadata for simulation config
+                        result["_archetype_activity_level"] = archetype_defaults.get("activity_level")
+                        result["_archetype_sentiment_bias"] = archetype_defaults.get("sentiment_bias")
+                        result["_archetype_stance"] = archetype_defaults.get("stance")
 
                     return result
 
@@ -800,7 +826,8 @@ Important:
         graph_id: Optional[str] = None,
         parallel_count: int = 5,
         realtime_output_path: Optional[str] = None,
-        output_platform: str = "reddit"
+        output_platform: str = "reddit",
+        archetype_assignments: Optional[Dict[str, str]] = None
     ) -> List[OasisAgentProfile]:
         """
         Generate Agent Profiles in batch from entities (supports parallel generation)
@@ -813,6 +840,7 @@ Important:
             parallel_count: Number of parallel generations, default 5
             realtime_output_path: Real-time output file path (if provided, write after each generation)
             output_platform: Output platform format ("reddit" or "twitter")
+            archetype_assignments: Optional {entity_uuid: archetype_key} mapping
 
         Returns:
             List of Agent Profiles
@@ -864,11 +892,17 @@ Important:
             """Worker function to generate single profile"""
             entity_type = entity.get_entity_type() or "Entity"
 
+            # Look up archetype assignment for this entity
+            arch_key = None
+            if archetype_assignments and entity.uuid in archetype_assignments:
+                arch_key = archetype_assignments[entity.uuid]
+
             try:
                 profile = self.generate_profile_from_entity(
                     entity=entity,
                     user_id=idx,
-                    use_llm=use_llm
+                    use_llm=use_llm,
+                    archetype_key=arch_key
                 )
 
                 # Real-time output generated persona to console and log

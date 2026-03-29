@@ -553,7 +553,8 @@ const formatTime = (timestamp) => {
 
 const renderMarkdown = (content) => {
   if (!content) return ''
-  
+  if (typeof content !== 'string') content = typeof content === 'object' ? JSON.stringify(content) : String(content)
+
   let processedContent = content.replace(/^##\s+.+\n+/, '')
   let html = processedContent.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
   html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
@@ -761,9 +762,13 @@ const sendToAgent = async (message) => {
     }
 
     if (responseContent) {
+      // Ensure responseContent is a string (API may return object)
+      if (typeof responseContent === 'object' && responseContent !== null) {
+        responseContent = responseContent.response || responseContent.answer || JSON.stringify(responseContent)
+      }
       chatHistory.value.push({
         role: 'assistant',
-        content: responseContent,
+        content: String(responseContent),
         timestamp: new Date().toISOString()
       })
       addLog(`${selectedAgent.value.username} replied`)
@@ -852,12 +857,17 @@ const submitSurvey = async () => {
           }
         }
 
+        // Ensure responseContent is a string (API may return object)
+        if (typeof responseContent === 'object' && responseContent !== null) {
+          responseContent = responseContent.response || responseContent.answer || JSON.stringify(responseContent)
+        }
+
         surveyResultsList.push({
           agent_id: agentIdx,
           agent_name: agent?.username || `Agent ${agentIdx}`,
           profession: agent?.profession,
           question: surveyQuestion.value.trim(),
-          answer: responseContent
+          answer: String(responseContent)
         })
       }
 

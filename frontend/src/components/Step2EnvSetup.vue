@@ -334,7 +334,7 @@
               </div>
               <div class="reasoning-content">
                 <div 
-                  v-for="(reason, idx) in simulationConfig.generation_reasoning.split('|').slice(0, 2)" 
+                  v-for="(reason, idx) in String(simulationConfig.generation_reasoning).split('|').slice(0, 2)"
                   :key="idx" 
                   class="reasoning-item"
                 >
@@ -755,6 +755,8 @@ const handleStartSimulation = () => {
 }
 
 const truncateBio = (bio) => {
+  if (!bio) return ''
+  if (typeof bio !== 'string') bio = typeof bio === 'object' ? JSON.stringify(bio) : String(bio)
   if (bio.length > 80) {
     return bio.substring(0, 80) + '...'
   }
@@ -877,14 +879,15 @@ const pollPrepareStatus = async () => {
         }
       } else if (data.message) {
         // Extract phase from message
-        const match = data.message.match(/\[(\d+)\/(\d+)\]\s*([^:]+)/)
+        const msg = typeof data.message === 'string' ? data.message : String(data.message)
+        const match = msg.match(/\[(\d+)\/(\d+)\]\s*([^:]+)/)
         if (match) {
           currentStage.value = match[3].trim()
         }
         // Output message log（Avoid duplication）
-        if (data.message !== lastLoggedMessage) {
-          lastLoggedMessage = data.message
-          addLog(data.message)
+        if (msg !== lastLoggedMessage) {
+          lastLoggedMessage = msg
+          addLog(msg)
         }
       }
       
@@ -1002,7 +1005,7 @@ const fetchConfigRealtime = async () => {
         
         // Show event configuration
         if (data.config.event_config?.narrative_direction) {
-          const narrative = data.config.event_config.narrative_direction
+          const narrative = String(data.config.event_config.narrative_direction)
           addLog(`Narrative Direction: ${narrative.length > 50 ? narrative.substring(0, 50) + '...' : narrative}`)
         }
         

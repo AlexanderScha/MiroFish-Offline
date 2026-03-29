@@ -1,0 +1,49 @@
+[Unit]
+Description=MiroFish vLLM Server (Qwen2.5-32B-Instruct-AWQ, dual RTX 3090)
+After=network.target
+
+[Service]
+Type=simple
+User=tank
+Group=tank
+WorkingDirectory=/home/tank/Development_Projects/MiroFish-Offline
+
+# Conda environment setup
+Environment=CONDA_PREFIX=/home/tank/miniconda3/envs/mirofish
+Environment=PATH=/home/tank/miniconda3/envs/mirofish/bin:/home/tank/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=LD_LIBRARY_PATH=/home/tank/miniconda3/envs/mirofish/lib
+
+# Kill any lingering GPU processes before starting
+ExecStartPre=/bin/bash -c 'PIDS=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader | tr -d " "); if [ -n "$PIDS" ]; then echo "Killing lingering GPU processes: $PIDS"; echo "$PIDS" | xargs -r kill -9; sleep 2; fi'
+
+ExecStart=/home/tank/miniconda3/envs/mirofish/bin/python3 -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen2.5-32B-Instruct-AWQ \
+    --tensor-parallel-size 2 \
+    --max-num-seqs 16 \
+    --max-model-len 16384 \
+    --gpu-memory-utilization 0.85 \
+    --port 8000 \
+    --host 0.0.0.0 \
+    --served-model-name qwen2.5:32b \
+    --trust-remote-code \
+    --no-enable-log-requests \
+    --quantization awq \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes
+
+# Clean shutdown: send SIGTERM to the entire process group
+ExecStop=/bin/kill -s TERM -$MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=10
+
+# Log to journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mirofish-vllm
+
+[Install]
+WantedBy=multi-user.target

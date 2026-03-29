@@ -332,14 +332,16 @@ const formatTime = (dateStr) => {
 // Truncate text
 const truncateText = (text, maxLength) => {
   if (!text) return ''
+  if (typeof text !== 'string') text = typeof text === 'object' ? JSON.stringify(text) : String(text)
   return text.length > maxLength ? text.slice(0, maxLength) + '...' : text
 }
 
 // Generate title from simulation requirement (first 20 characters)
 const getSimulationTitle = (requirement) => {
   if (!requirement) return 'Unnamed Simulation'
-  const title = requirement.slice(0, 20)
-  return requirement.length > 20 ? title + '...' : title
+  const req = typeof requirement === 'string' ? requirement : String(requirement)
+  const title = req.slice(0, 20)
+  return req.length > 20 ? title + '...' : title
 }
 
 // Format simulation_id display (first 6 characters)

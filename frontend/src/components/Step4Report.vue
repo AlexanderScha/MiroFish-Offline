@@ -549,7 +549,9 @@ const parseInsightForge = (text) => {
     entities: [],
     relations: []
   }
-  
+  if (!text) return result
+  if (typeof text !== 'string') text = typeof text === 'object' ? JSON.stringify(text) : String(text)
+
   try {
     // Extract analysis query
     const queryMatch = text.match(/Analysis Query:\s*(.+?)(?:\n|$)/)
@@ -630,6 +632,8 @@ const parsePanorama = (text) => {
     historicalFacts: [],
     entities: []
   }
+  if (!text) return result
+  if (typeof text !== 'string') text = typeof text === 'object' ? JSON.stringify(text) : String(text)
 
   try {
     // Extract query
@@ -694,7 +698,9 @@ const parseInterview = (text) => {
     interviews: [],
     summary: ''
   }
-  
+  if (!text) return result
+  if (typeof text !== 'string') text = typeof text === 'object' ? JSON.stringify(text) : String(text)
+
   try {
     // Extract interview topic
     const topicMatch = text.match(/\*\*Interview Topic:\*\*\s*(.+?)(?:\n|$)/)
@@ -907,6 +913,8 @@ const parseQuickSearch = (text) => {
     edges: [],
     nodes: []
   }
+  if (!text) return result
+  if (typeof text !== 'string') text = typeof text === 'object' ? JSON.stringify(text) : String(text)
 
   try {
     // Extract search query
@@ -1862,13 +1870,15 @@ const formatResultSize = (length) => {
 
 const truncateText = (text, maxLen) => {
   if (!text) return ''
+  if (typeof text !== 'string') text = typeof text === 'object' ? JSON.stringify(text) : String(text)
   if (text.length <= maxLen) return text
   return text.substring(0, maxLen) + '...'
 }
 
 const renderMarkdown = (content) => {
   if (!content) return ''
-  
+  if (typeof content !== 'string') content = typeof content === 'object' ? JSON.stringify(content) : String(content)
+
   // Remove leading level-2 headings (## xxx), since section title is already shown in parent
   let processedContent = content.replace(/^##\s+.+\n+/, '')
 
@@ -2006,6 +2016,7 @@ const getActionLabel = (action) => {
 }
 
 const getLogLevelClass = (log) => {
+  if (typeof log !== 'string') return ''
   if (log.includes('ERROR') || log.includes('Error')) return 'error'
   if (log.includes('WARNING') || log.includes('Warning')) return 'warning'
   // INFO uses default color, not marked as success
@@ -2082,6 +2093,7 @@ const fetchAgentLog = async () => {
 // Extract final answer content - extract section content from LLM response
 const extractFinalContent = (response) => {
   if (!response) return null
+  if (typeof response !== 'string') response = typeof response === 'object' ? JSON.stringify(response) : String(response)
 
   // Try to extract content inside <final_answer> tags
   const finalAnswerTagMatch = response.match(/<final_answer>([\s\S]*?)<\/final_answer>/)

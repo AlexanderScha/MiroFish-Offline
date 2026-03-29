@@ -1308,18 +1308,20 @@ async def run_twitter_simulation(
                 round_agent_actions[aid] = []
             round_agent_actions[aid].append(action_data)
 
-        # Save agent memories after round (only for agents that acted)
+        # Accumulate actions for periodic memory summarization
         if _memory_service and simulation_id and round_agent_actions:
             try:
-                _memory_service.save_round_memories(
-                    simulation_id=simulation_id,
-                    round_num=round_num + 1,
-                    agent_actions=round_agent_actions,
-                    agent_names=agent_names,
-                    agent_personas=agent_personas,
-                )
+                _memory_service.accumulate_actions(round_agent_actions)
+                # Flush (LLM summarize) every N rounds
+                if (round_num + 1) % _memory_service.summarize_interval == 0:
+                    _memory_service.flush_memories(
+                        simulation_id=simulation_id,
+                        round_num=round_num + 1,
+                        agent_names=agent_names,
+                        agent_personas=agent_personas,
+                    )
             except Exception as e:
-                logging.warning(f"[Twitter] Memory save failed (non-fatal): {e}")
+                logging.warning(f"[Twitter] Memory failed (non-fatal): {e}")
 
         if action_logger:
             action_logger.log_round_end(round_num + 1, round_action_count)
@@ -1327,6 +1329,19 @@ async def run_twitter_simulation(
         if (round_num + 1) % 20 == 0:
             progress = (round_num + 1) / total_rounds * 100
             log_info(f"Day {simulated_day}, {simulated_hour:02d}:00 - Round {round_num + 1}/{total_rounds} ({progress:.1f}%)")
+
+    # Flush any remaining memories at simulation end
+    if _memory_service and simulation_id:
+        try:
+            _memory_service.flush_memories(
+                simulation_id=simulation_id,
+                round_num=total_rounds,
+                agent_names=agent_names,
+                agent_personas=agent_personas,
+                force=True,
+            )
+        except Exception as e:
+            logging.warning(f"[Twitter] Final memory flush failed (non-fatal): {e}")
 
     # Note: Do not close environment, keep for Interview use
 
@@ -1547,18 +1562,20 @@ async def run_reddit_simulation(
                 round_agent_actions[aid] = []
             round_agent_actions[aid].append(action_data)
 
-        # Save agent memories after round (only for agents that acted)
+        # Accumulate actions for periodic memory summarization
         if _memory_service and simulation_id and round_agent_actions:
             try:
-                _memory_service.save_round_memories(
-                    simulation_id=simulation_id,
-                    round_num=round_num + 1,
-                    agent_actions=round_agent_actions,
-                    agent_names=agent_names,
-                    agent_personas=agent_personas,
-                )
+                _memory_service.accumulate_actions(round_agent_actions)
+                # Flush (LLM summarize) every N rounds
+                if (round_num + 1) % _memory_service.summarize_interval == 0:
+                    _memory_service.flush_memories(
+                        simulation_id=simulation_id,
+                        round_num=round_num + 1,
+                        agent_names=agent_names,
+                        agent_personas=agent_personas,
+                    )
             except Exception as e:
-                logging.warning(f"[Reddit] Memory save failed (non-fatal): {e}")
+                logging.warning(f"[Reddit] Memory failed (non-fatal): {e}")
 
         if action_logger:
             action_logger.log_round_end(round_num + 1, round_action_count)
@@ -1566,6 +1583,19 @@ async def run_reddit_simulation(
         if (round_num + 1) % 20 == 0:
             progress = (round_num + 1) / total_rounds * 100
             log_info(f"Day {simulated_day}, {simulated_hour:02d}:00 - Round {round_num + 1}/{total_rounds} ({progress:.1f}%)")
+
+    # Flush any remaining memories at simulation end
+    if _memory_service and simulation_id:
+        try:
+            _memory_service.flush_memories(
+                simulation_id=simulation_id,
+                round_num=total_rounds,
+                agent_names=agent_names,
+                agent_personas=agent_personas,
+                force=True,
+            )
+        except Exception as e:
+            logging.warning(f"[Reddit] Final memory flush failed (non-fatal): {e}")
 
     # Note: Do not close environment, keep for Interview use
 

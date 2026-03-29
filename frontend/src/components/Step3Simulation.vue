@@ -625,6 +625,7 @@ const getActionTypeClass = (type) => {
 
 const truncateContent = (content, maxLength = 100) => {
   if (!content) return ''
+  if (typeof content !== 'string') content = typeof content === 'object' ? JSON.stringify(content) : String(content)
   if (content.length > maxLength) return content.substring(0, maxLength) + '...'
   return content
 }

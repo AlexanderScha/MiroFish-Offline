@@ -2,6 +2,11 @@
 # Start vLLM server with tensor parallelism across both RTX 3090s
 # Serves Qwen2.5-32B-Instruct-AWQ on port 8000 (OpenAI-compatible API)
 # Ollama continues to run on port 11434 for embeddings (nomic-embed-text)
+#
+# Alternative: install as systemd service for auto-restart and clean GPU management:
+#   sudo cp vllm.service /etc/systemd/system/mirofish-vllm.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mirofish-vllm.service
 
 set -e
 
