@@ -1,345 +1,242 @@
 # MiroFish-Offline: Next Session Handoff
 
-**Date:** 2026-03-28
-**Status:** vLLM + security complete. Next: simulation enhancements.
-**Current Version:** Python/Flask + vLLM (dual GPU) + Ollama (embeddings) + Neo4j + Vue3
+**Date:** 2026-03-30
+**Status:** Full pipeline proven (23 agents, 72 rounds, 119 min). Needs optimization and hardening.
 **Fork:** https://github.com/DrFrankieD-AI/MiroFish-Offline
 
 ---
 
-## ✅ What's Been Done (Sessions 1-2)
+## ✅ What's Been Done
 
-| Phase | Status | Result |
-|-------|--------|--------|
-| Repository setup & security audit | ✅ | 13 vulnerabilities identified |
-| vLLM dual-GPU tensor parallelism | ✅ | 5-63x simulation speedup |
-| Batched agent decisions | ✅ | Free — OASIS already had asyncio.gather |
-| Report optimization (timeouts) | ✅ | 180s → 300s |
-| Security hardening | ✅ | API key auth, CORS, rate limiting, error handler |
-| Git fork + upstream PR branches | ✅ | 3 branches ready for PRs |
+### Infrastructure (Sessions 1-2)
+- vLLM 0.18.0 dual-GPU tensor parallelism (Qwen2.5-32B-Instruct-AWQ)
+- Security: API key auth, CORS, rate limiting, error handler
+- Interview timeouts raised to 300s, tool-choice support added
+- SQLite permission fix (umask before OASIS DB creation)
 
-**Performance now:**
-- Single LLM call: 0.37s (was 5s)
-- 4-agent round: 0.7s (was 20s)
-- 25-round simulation: ~8s (was 510s)
+### Features (Sessions 3-4)
+- Agent memory persistence (LLM-summarized, Neo4j storage, prompt injection)
+- Memory optimization (accumulate actions, flush every 5 rounds)
+- Custom archetypes system (11 built-in, REST API, profile generator integration)
+- vLLM systemd service file
+- Frontend defensive parsing (17 fixes across 5 components)
+- Report chat response parsing fix
 
----
-
-## 🎯 Next Session Plan: Simulation Enhancements
-
-### Roadmap items addressed (from ROADMAP.md)
-
-| Roadmap Item | Version | Priority | Effort |
-|---|---|---|---|
-| Agent memory persistence across rounds | v0.6.0 | **HIGH** | 3 days |
-| Custom agent archetypes | v0.6.0 | **HIGH** | 2 days |
-| Model router (fast NER, large reports) | v0.5.0 | MEDIUM | 1 day |
-| Export simulation transcripts as JSON | v0.6.0 | MEDIUM | 0.5 day |
-| /api/status endpoint | v0.3.0 | LOW | 2 hours |
-| Configurable hybrid search weights | v0.4.0 | LOW | 0.5 day |
-
----
-
-### Priority 1: Agent Memory Persistence (3 days)
-
-**Problem:** Agents have no memory between simulation rounds or across runs. Each round they start fresh — only the LLM prompt + current observation drives behavior. This makes multi-day simulations feel shallow.
-
-**Current architecture:**
-- Agent state lives in OASIS `OasisEnv` — ephemeral, in-memory only
-- No `.save_state()` or `.memory` attribute on OASIS agents
-- `GraphMemoryUpdater` already captures actions to Neo4j (but agents can't read them back)
-- Agent interviews already inject graph context into prompts
-
-**Recommended approach: LLM-summarized memory via Neo4j (Option C from research)**
-
-This avoids patching OASIS and leverages existing infrastructure:
-
+### Full Pipeline Test: Meridian Health PR (23 agents, 72 rounds)
 ```
-After each round:
-  1. Collect all agent actions from that round (from actions.jsonl)
-  2. For each agent that acted: query Neo4j for their accumulated facts
-  3. Ask LLM: "Summarize what [Agent] knows after round N" (100-200 tokens)
-  4. Store summary as agent memory node in Neo4j
+Phase 1 (Ontology):         167s    (2.8 min)    2%
+Phase 2 (Graph Build):      580s    (9.7 min)    8%
+Phase 3 (Agent Profiles):   ~420s   (~7 min)     6%
+Phase 4 (Simulation):       4301s   (71.7 min)   60%  ← biggest bottleneck
+Phase 5 (Report):           ~1680s  (~28 min)    24%
+─────────────────────────────────────────────────
+TOTAL:                      ~7148s  (~119 min / ~2 hrs)
 
-Before each round:
-  1. For each active agent: retrieve their memory summary from Neo4j
-  2. Inject into the agent's system prompt prefix
-  3. Agent now "remembers" what happened in previous rounds
-```
-
-**Files to modify:**
-
-1. **`backend/app/services/agent_memory_persistence.py`** (NEW)
-   ```python
-   class AgentMemoryService:
-       """Persist agent memory summaries to Neo4j between rounds"""
-
-       def save_round_memories(self, graph_id, simulation_id, round_num, agent_actions):
-           """After each round: summarize and store agent memories"""
-           for agent_id, actions in agent_actions.items():
-               # Build context from actions + existing memory
-               existing_memory = self.get_agent_memory(graph_id, agent_id)
-               new_actions = format_actions(actions)
-
-               # Ask LLM: "Update this agent's memory summary"
-               updated_memory = self.llm.summarize(
-                   f"Agent: {agent_name}\n"
-                   f"Previous memory: {existing_memory}\n"
-                   f"New actions this round: {new_actions}\n"
-                   f"Write an updated memory summary (200 tokens max)."
-               )
-
-               # Store in Neo4j as agent memory node
-               self.storage.upsert_agent_memory(graph_id, agent_id, updated_memory, round_num)
-
-       def get_agent_memory(self, graph_id, agent_id) -> str:
-           """Retrieve agent's accumulated memory for prompt injection"""
-           # Query Neo4j for latest memory node
-           return self.storage.get_agent_memory(graph_id, agent_id)
-   ```
-
-2. **`backend/scripts/run_parallel_simulation.py`** (~lines 1253-1275)
-   - After `await result.env.step(actions)`, call `memory_service.save_round_memories()`
-   - Before building `actions` dict, inject memory into agent prompts
-
-3. **`backend/app/storage/neo4j_storage.py`**
-   - Add `upsert_agent_memory()` and `get_agent_memory()` methods
-   - New node type: `(:AgentMemory {agent_id, simulation_id, round_num, summary})`
-
-4. **`backend/app/storage/neo4j_schema.py`**
-   - Add schema for AgentMemory nodes and indexes
-
-**Key challenge:** OASIS agents don't expose a way to modify their system prompt mid-simulation. Options:
-- a) Monkey-patch agent's `system_message` before each round (fragile but works)
-- b) Prepend memory to the observation/environment state that agents receive
-- c) Use OASIS's `ManualAction` to inject a "memory update" message
-
-Option (b) is cleanest — modify `get_active_agents_for_round()` to inject memory context into agent observations.
-
-**Expected result:** Agents reference their past actions and positions, creating more coherent multi-day narratives.
-
----
-
-### Priority 2: Custom Agent Archetypes (2 days)
-
-**Problem:** All agents are generated from a single LLM prompt with entity context. No way to define reusable personality templates (e.g., "aggressive trader", "cautious academic", "viral influencer") that shape behavior independently of the source document.
-
-**Current architecture:**
-- `oasis_profile_generator.py` (850+ lines)
-- Two generation methods: LLM-based (default) and rule-based (fallback)
-- Entity types classified as INDIVIDUAL vs GROUP (lines 154-178)
-- Rule-based templates are hardcoded per entity type (lines 718-789)
-- No user-facing way to define custom archetypes
-
-**Implementation plan:**
-
-1. **`backend/app/services/archetypes.py`** (NEW) — Archetype definition system
-   ```python
-   @dataclass
-   class AgentArchetype:
-       name: str                    # e.g., "Aggressive Trader"
-       description: str             # Human-readable description
-       personality_traits: List[str]  # e.g., ["risk-taking", "data-driven", "impatient"]
-       mbti_pool: List[str]         # e.g., ["ENTJ", "ESTP", "ENTP"]
-       age_range: Tuple[int, int]   # e.g., (28, 55)
-       activity_level: float        # 0.0-1.0
-       sentiment_bias: float        # -1.0 to 1.0
-       stance_tendency: str         # "supportive", "opposing", "neutral", "contrarian"
-       speaking_style: str          # e.g., "Short, punchy, uses financial jargon"
-       prompt_modifier: str         # Injected into persona generation prompt
-
-   # Built-in archetypes
-   BUILTIN_ARCHETYPES = {
-       "aggressive_trader": AgentArchetype(
-           name="Aggressive Trader",
-           personality_traits=["risk-taking", "data-driven", "fast-reacting"],
-           mbti_pool=["ENTJ", "ESTP"],
-           sentiment_bias=0.3,
-           stance_tendency="contrarian",
-           speaking_style="Short, data-heavy, uses $TICKER format",
-           prompt_modifier="This agent reacts strongly to market signals..."
-       ),
-       "cautious_academic": AgentArchetype(...),
-       "viral_influencer": AgentArchetype(...),
-       "corporate_pr": AgentArchetype(...),
-       "concerned_citizen": AgentArchetype(...),
-       "investigative_journalist": AgentArchetype(...),
-       "tech_enthusiast": AgentArchetype(...),
-       "policy_analyst": AgentArchetype(...),
-   }
-   ```
-
-2. **Modify `oasis_profile_generator.py`**
-   - Accept optional `archetype` parameter per entity
-   - Inject archetype's `prompt_modifier` and traits into persona generation prompt
-   - Use archetype's `mbti_pool`, `age_range`, `activity_level` as defaults
-   - Fall back to current behavior if no archetype specified
-
-3. **`backend/app/api/archetypes.py`** (NEW) — REST API for archetypes
-   ```
-   GET  /api/archetypes              — List available archetypes
-   GET  /api/archetypes/:name        — Get archetype details
-   POST /api/archetypes              — Create custom archetype
-   PUT  /api/archetypes/:name        — Update archetype
-   ```
-
-4. **Modify simulation create/prepare API**
-   - Accept `archetype_assignments: {entity_uuid: archetype_name}` in prepare request
-   - Frontend can show archetype picker per entity during env setup
-
-5. **Store custom archetypes**
-   - Save to `backend/uploads/archetypes/` as JSON files
-   - Built-in archetypes in code, custom ones on disk
-   - No database needed (simple file storage)
-
-**Expected result:** Users can assign "Aggressive Trader" to some agents and "Cautious Academic" to others, creating more diverse and realistic simulation dynamics.
-
----
-
-### Priority 3: Model Router (1 day)
-
-**Problem:** The 32B model is used for everything — NER extraction, ontology generation, agent profiles, simulation, reports. Some of these (NER, embeddings) don't need a 32B model and would be faster with a smaller one.
-
-**Current architecture:**
-- Single `LLM_MODEL_NAME` in .env used everywhere
-- `LLMClient` class reads from Config
-- OASIS/CAMEL reads `OPENAI_API_BASE_URL` and uses whatever model is served
-
-**Implementation:**
-
-1. **Update `.env`:**
-   ```bash
-   # Model routing
-   LLM_MODEL_FAST=qwen2.5:7b          # For NER, ontology, embeddings
-   LLM_MODEL_LARGE=qwen2.5:32b        # For simulation, reports, interviews
-   ```
-
-2. **Update `config.py`:**
-   ```python
-   LLM_MODEL_FAST = os.environ.get('LLM_MODEL_FAST', LLM_MODEL_NAME)
-   LLM_MODEL_LARGE = os.environ.get('LLM_MODEL_LARGE', LLM_MODEL_NAME)
-   ```
-
-3. **Update `llm_client.py`:**
-   ```python
-   def get_client(task_type: str = "default") -> LLMClient:
-       if task_type in ("ner", "ontology", "profile_generation"):
-           return LLMClient(model=Config.LLM_MODEL_FAST)
-       else:
-           return LLMClient(model=Config.LLM_MODEL_LARGE)
-   ```
-
-4. **vLLM multi-model:** vLLM 0.18 supports serving multiple models. Update `start-vllm.sh` to optionally serve both:
-   ```bash
-   # Or: run two vLLM instances on separate ports
-   # Port 8000: 32B model (GPU 0+1, TP=2)
-   # Port 8001: 7B model (CPU or separate GPU)
-   ```
-
-   Simpler alternative: serve one model on vLLM, keep Ollama for the fast model:
-   ```bash
-   LLM_MODEL_FAST=qwen2.5:7b           # Served by Ollama (port 11434)
-   LLM_MODEL_LARGE=qwen2.5:32b         # Served by vLLM (port 8000)
-   LLM_BASE_URL_FAST=http://localhost:11434/v1
-   LLM_BASE_URL_LARGE=http://localhost:8000/v1
-   ```
-
-**Expected result:** NER and ontology generation 3-5x faster (7B vs 32B), while keeping full quality for simulation and reports.
-
----
-
-### Priority 4: Export Simulation Transcripts (0.5 day)
-
-**Quick win.** Add an API endpoint to export simulation data as structured JSON.
-
-1. **`GET /api/simulation/:id/export`**
-   ```json
-   {
-     "simulation_id": "sim_xxx",
-     "config": {...},
-     "agents": [...],
-     "rounds": [
-       {
-         "round": 1,
-         "simulated_hour": 0,
-         "twitter_actions": [...],
-         "reddit_actions": [...]
-       }
-     ],
-     "summary": {
-       "total_rounds": 25,
-       "total_actions": 36,
-       "most_active_agent": "Apple Inc.",
-       "sentiment_trend": [...]
-     }
-   }
-   ```
-
-2. **Files:** Add export endpoint to `backend/app/api/simulation.py`, read from existing `actions.jsonl` files.
-
----
-
-### Priority 5: /api/status Endpoint (2 hours)
-
-Quick win. Replace the basic `/health` with a comprehensive status check.
-
-```json
-GET /api/status
-{
-  "status": "ok",
-  "services": {
-    "neo4j": {"connected": true, "uri": "bolt://localhost:7687"},
-    "vllm": {"connected": true, "model": "qwen2.5:32b", "gpu_count": 2},
-    "ollama": {"connected": true, "embedding_model": "nomic-embed-text"}
-  },
-  "gpu": [
-    {"index": 0, "name": "RTX 3090", "memory_used": "21.3GB", "memory_total": "24GB"},
-    {"index": 1, "name": "RTX 3090", "memory_used": "21.3GB", "memory_total": "24GB"}
-  ],
-  "disk_free": "1.5TB",
-  "active_simulations": 1
-}
+Output: 371 actions, 23 agent memories, 4-section report
 ```
 
 ---
 
-## 📋 Implementation Checklist
+## 🐛 Known Bugs (Must Fix)
 
-### Week 1: Agent Memory + Archetypes
+### 1. Memory summarization exceeds 16K context
+**Severity:** Medium — causes warning, some memories fail to update
+**Cause:** When an agent accumulates many actions over 5 rounds, the summarization prompt (previous memory + all new actions) exceeds vLLM's 16K max context.
+**Fix:** Truncate the prompt input:
+```python
+# In agent_memory_persistence.py, before building prompt:
+# Truncate previous memory to 500 words
+if previous_memory and len(previous_memory.split()) > 500:
+    previous_memory = ' '.join(previous_memory.split()[:500]) + '...'
+# Truncate new actions to 20 most recent
+if len(action_lines) > 20:
+    action_lines = action_lines[-20:]
+```
+**Effort:** 30 minutes
 
-- [ ] **Day 1-2: Agent Memory Persistence**
-  - [ ] Create `agent_memory_persistence.py` service
-  - [ ] Add Neo4j schema for AgentMemory nodes
-  - [ ] Add `upsert_agent_memory()` / `get_agent_memory()` to storage
-  - [ ] Modify `run_parallel_simulation.py` to save memories after each round
-  - [ ] Modify agent prompt injection to include memory context
-  - [ ] Test: run 25-round simulation, verify agents reference past events
+### 2. Ollama embeddings fail when vLLM uses too much GPU
+**Severity:** Medium — graph search degrades to BM25-only (no vector search)
+**Cause:** vLLM `--gpu-memory-utilization 0.85` leaves no room for Ollama's embedding model
+**Fix:** Lower to 0.75 in `start-vllm.sh` and `vllm.service`:
+```bash
+--gpu-memory-utilization 0.75
+```
+**Trade-off:** Slightly less KV cache headroom for vLLM (still plenty for 16 concurrent seqs)
+**Effort:** 5 minutes
 
-- [ ] **Day 3-4: Custom Archetypes**
-  - [ ] Create `archetypes.py` with built-in archetype definitions
-  - [ ] Create `/api/archetypes` REST endpoints
-  - [ ] Modify `oasis_profile_generator.py` to accept archetype parameter
-  - [ ] Modify simulation prepare API to accept archetype assignments
-  - [ ] Test: assign different archetypes to entities, verify diverse behavior
+### 3. Frontend fragility — silent failures
+**Severity:** Low-Medium — errors show in console but UI appears hung
+**Examples encountered:**
+- Report chat response was nested object, not string (fixed)
+- Simulation status 500 during state transition (transient)
+- getSimulation 500 when navigating before prep complete
+**Fix:** Add loading states and error toasts to UI
+**Effort:** 1 day
 
-- [ ] **Day 5: Model Router + Quick Wins**
-  - [ ] Add model routing to `config.py` and `llm_client.py`
-  - [ ] Configure Ollama for fast model, vLLM for large model
-  - [ ] Add `/api/status` endpoint
-  - [ ] Add `/api/simulation/:id/export` endpoint
-  - [ ] Test full pipeline with model routing
-
-### Week 2: Polish + Upstream PRs
-
-- [ ] Create proper GitHub fork (when cooldown expires)
-- [ ] Submit 3 PRs to nikmcfly/MiroFish-Offline
-- [ ] Configurable hybrid search weights (v0.4.0)
-- [ ] Input validation with Pydantic schemas
-- [ ] Update all documentation
+### 4. Simulation subprocess dies silently
+**Severity:** Medium — no recovery mechanism, user sees stale status
+**Cause:** OOM or unhandled exception in OASIS subprocess
+**Fix:**
+- Add heartbeat file (subprocess writes timestamp every 30s)
+- Backend monitors heartbeat, marks simulation as failed if stale
+- Add process memory monitoring
+**Effort:** 2-3 hours
 
 ---
 
-## 🚦 Quick Start for Next Session
+## 🔧 Performance Optimization Plan
+
+### Simulation Loop (71.7 min → ~25 min)
+
+| Optimization | Savings | Effort | How |
+|-------------|---------|--------|-----|
+| **Parallel memory summaries** | -17 min | 2 hrs | Use `asyncio.gather()` for all agent summary LLM calls instead of sequential |
+| **Memory interval 5→10** | -7 min | 5 min | Change `DEFAULT_SUMMARIZE_INTERVAL = 10` in agent_memory_persistence.py |
+| **Truncate memory prompts** | -5 min | 30 min | Cap previous_memory at 500 words, new_actions at 20 items |
+| **Total sim savings** | **~29 min** | | **71.7 → ~43 min** |
+
+### Graph Build (9.7 min → ~2 min)
+
+| Optimization | Savings | Effort | How |
+|-------------|---------|--------|-----|
+| **Parallel NER extraction** | -8 min | 1 day | Fire all 8 batch NER prompts concurrently to vLLM via asyncio |
+| **Total build savings** | **~8 min** | | **9.7 → ~2 min** |
+
+### Report Generation (28 min → ~10 min)
+
+| Optimization | Savings | Effort | How |
+|-------------|---------|--------|-----|
+| **Parallel tool calls** | -10 min | 2 hrs | Run InsightForge + PanoramaSearch + QuickSearch concurrently |
+| **Parallel section generation** | -5 min | 4 hrs | Generate independent sections in parallel |
+| **Reduce interview rounds** | -3 min | config | Interview 3 agents instead of 5 per section |
+| **Total report savings** | **~18 min** | | **28 → ~10 min** |
+
+### Other
+
+| Optimization | Savings | Effort |
+|-------------|---------|--------|
+| GPU memory for embeddings (0.85→0.75) | fixes embedding failures | 5 min |
+| Agent profile parallelism ×10 | -4 min | 10 min |
+
+### Summary: 119 min → ~55 min (2.2x faster)
+
+---
+
+## 🏗️ Resilience Hardening Plan
+
+### Why it feels fragile
+
+Every run has uncovered bugs because:
+1. **No error boundaries in UI** — API errors cause silent failures or cryptic console errors
+2. **Subprocess isolation** — simulation runs as a separate process with file-based IPC (fragile)
+3. **State transitions** — UI polls APIs during state changes, gets transient 500s
+4. **GPU memory contention** — vLLM + Ollama + OASIS fight for GPU memory
+5. **No health monitoring** — if a subprocess dies, nothing notices
+
+### Hardening Checklist (Priority Order)
+
+#### A. Process Management (1 day)
+- [ ] Subprocess heartbeat monitoring (write timestamp every 30s, detect stale)
+- [ ] Auto-restart failed simulations with backoff
+- [ ] GPU memory monitoring (warn if <2GB free before starting sim)
+- [ ] Clean process tree teardown on simulation stop
+
+#### B. Error Handling in UI (1 day)
+- [ ] Global axios error interceptor with user-friendly toast notifications
+- [ ] Loading spinners during all API calls (no silent hangs)
+- [ ] Retry logic with exponential backoff on transient 500s
+- [ ] Graceful degradation messages ("Report search limited — embedding service unavailable")
+
+#### C. State Machine Hardening (0.5 day)
+- [ ] Backend: validate state transitions (can't start simulation if not in READY state)
+- [ ] Frontend: disable buttons during invalid states
+- [ ] Race condition protection on concurrent API calls
+
+#### D. Resource Management (0.5 day)
+- [ ] vLLM GPU memory allocation: 0.85 → 0.75 (leave room for embeddings)
+- [ ] Memory summarization prompt truncation (prevent 16K overflow)
+- [ ] SQLite connection pooling / timeout handling
+- [ ] Temp file cleanup after simulation completes
+
+#### E. Observability (1 day)
+- [ ] `/api/status` endpoint (Neo4j, vLLM, Ollama, GPU, disk, active sims)
+- [ ] Structured JSON logging (replace print statements)
+- [ ] Simulation timing metrics (per-phase duration logged)
+- [ ] Error rate tracking
+
+---
+
+## 💰 LLM Backend Options
+
+### Current: Local vLLM (Free)
+- ✅ No per-call cost
+- ✅ Full privacy
+- ✅ Both GPUs utilized
+- ❌ 119 min for full pipeline
+- ❌ GPU memory contention with embeddings
+
+### Option: OpenRouter (Pay-per-call)
+- ✅ Faster models available (GPT-4o, Claude, etc.)
+- ✅ No GPU management
+- ❌ **Cost concern:** ~$3 per full simulation run at current scale
+  - Simulation: ~400 calls × ~2K tokens × $0.003/1K = ~$2.40
+  - Memory: ~100 calls × ~1K tokens = ~$0.30
+  - Report: ~40 calls × ~3K tokens = ~$0.36
+  - **Per-run total: ~$3**
+- ❌ Privacy: document content sent to external API
+- ❌ Cost unpredictable with testing/development iterations
+
+**Recommendation:** Keep local vLLM for development and testing (free iterations). Consider OpenRouter only for production with:
+- Per-client cost tracking
+- Hard spending cap ($50/day default)
+- Environment variable toggle: `LLM_BACKEND=local|openrouter`
+- Pass costs through to client billing
+
+### Option: Second vLLM instance for embeddings
+- Overkill — `nomic-embed-text` is 274MB, runs fine on CPU
+- Better fix: lower vLLM GPU utilization to 0.75
+
+### Option: Dedicated embedding on CPU
+```python
+# In embedding_service.py, add CPU fallback:
+# Use sentence-transformers directly (already installed)
+from sentence_transformers import SentenceTransformer
+model = SentenceTransformer('nomic-ai/nomic-embed-text-v1', device='cpu')
+```
+- Eliminates GPU contention entirely
+- ~50ms per embedding (fast enough)
+- No Ollama dependency for embeddings
+
+---
+
+## 📋 Next Session Priority
+
+### Quick Fixes (< 1 hour total)
+1. [ ] Memory prompt truncation (500 word cap) — 30 min
+2. [ ] vLLM GPU util 0.85 → 0.75 — 5 min
+3. [ ] Memory interval 5 → 10 — 5 min
+4. [ ] Commit and push — 5 min
+
+### Performance (1-2 days)
+5. [ ] Parallel memory summaries (asyncio.gather) — 2 hrs
+6. [ ] Parallel NER in graph build — 1 day
+7. [ ] Parallel report tool calls — 2 hrs
+
+### Resilience (2 days)
+8. [ ] Subprocess heartbeat monitoring — 3 hrs
+9. [ ] UI error toasts and loading states — 1 day
+10. [ ] `/api/status` endpoint — 2 hrs
+11. [ ] State machine validation — 4 hrs
+
+### Features (when stable)
+12. [ ] Custom archetypes UI in frontend
+13. [ ] Export simulation transcript as JSON
+14. [ ] Branded PDF report template
+15. [ ] OpenRouter backend option (with cost tracking)
+
+---
+
+## 🚦 Quick Start
 
 ```bash
 cd /home/tank/Development_Projects/MiroFish-Offline
@@ -347,53 +244,55 @@ conda activate mirofish
 
 # Start services
 docker-compose up -d neo4j
-nohup bash start-vllm.sh > logs/vllm.log 2>&1 &
-sleep 60
+# Ollama auto-starts via systemd
+nohup bash start-vllm.sh > logs/vllm.log 2>&1 &  # ~60s model load
 ./start-local.sh
 
+# Or install vLLM as systemd service:
+sudo cp vllm.service /etc/systemd/system/mirofish-vllm.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now mirofish-vllm.service
+
 # Verify
+nvidia-smi                             # Both GPUs loaded
 curl http://localhost:8000/v1/models   # vLLM
 curl http://localhost:5001/health      # Backend
-nvidia-smi                             # Both GPUs loaded
 
-# Access from office
-# http://192.168.1.153:3000
+# Access from office: http://192.168.1.153:3000
 ```
 
-## Architecture (Current)
+## Architecture
 
 ```
-Office Browser (192.168.1.153:3000)
-    │
-    ▼
-Vite Dev Server (:3000)  ──proxy──▶  Flask API (:5001)
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    ▼                   ▼                   ▼
-              vLLM (:8000)      Ollama (:11434)      Neo4j (:7687)
-              qwen2.5:32b       nomic-embed-text     Graph DB
-              GPU 0 + GPU 1     CPU/minimal GPU      Docker
-              TP=2, AWQ         Embeddings only
-              16K context
+Office Browser → Vite (:3000) → Flask (:5001) → vLLM (:8000) [2×RTX 3090, TP=2]
+                                              → Ollama (:11434) [embeddings]
+                                              → Neo4j (:7687) [Docker]
+                                              ↓
+                                    Simulation subprocess
+                                    (OASIS/CAMEL, SQLite, IPC)
+                                              ↓
+                                    Agent Memory (Neo4j)
 ```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `start-vllm.sh` | vLLM startup (dual GPU, auto-detect) |
-| `start-local.sh` / `stop-local.sh` | Backend + frontend lifecycle |
-| `.env` | All configuration (vLLM, Ollama, Neo4j, security) |
+| `start-vllm.sh` / `vllm.service` | vLLM lifecycle |
+| `start-local.sh` / `stop-local.sh` | Backend + frontend |
+| `.env` | All configuration |
+| `backend/app/services/agent_memory_persistence.py` | Memory system |
+| `backend/app/services/archetypes.py` | 11 archetype definitions + manager |
+| `backend/app/api/archetypes.py` | Archetype REST API |
 | `backend/app/middleware/` | Auth, rate limiting |
-| `backend/app/services/graph_memory_updater.py` | Existing graph memory (actions → Neo4j) |
-| `backend/app/services/oasis_profile_generator.py` | Agent profile generation (850+ lines) |
-| `backend/app/services/simulation_config_generator.py` | Simulation parameters (850+ lines) |
-| `backend/scripts/run_parallel_simulation.py` | Core simulation loop (line 1253 = agent step) |
-| `IMPROVEMENT_RESULTS.md` | Session 2 results and benchmarks |
+| `backend/scripts/run_parallel_simulation.py` | Core simulation loop |
+| `docs/private/STRATEGIC_ANALYSIS.md` | Business strategy (gitignored) |
+| `test_data/press_release_meridian_health.txt` | Test document |
 
 ## Known Issues
 
-1. **GPU 0 intermittent:** Fixed by reseating, but may recur — `start-vllm.sh` auto-falls back to TP=1
-2. **Zombie Vite processes:** Use `pkill -f vite` if port 3000 is occupied
-3. **GitHub fork cooldown:** Can't create proper fork yet — repo exists as independent copy
-4. **OASIS Python 3.12+:** Still requires Python 3.11 (camel-oasis constraint)
+1. **GPU memory:** vLLM at 0.85 starves Ollama embeddings → lower to 0.75
+2. **Memory overflow:** Summaries exceed 16K context → truncate prompt
+3. **Process management:** Simulation subprocess dies silently → add heartbeat
+4. **UI fragility:** Silent errors, no loading states → error toasts
+5. **Report speed:** 28 min due to sequential ReACT pattern → parallelize

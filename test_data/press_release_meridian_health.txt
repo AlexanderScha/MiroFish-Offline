@@ -1,0 +1,74 @@
+FOR IMMEDIATE RELEASE
+
+MERIDIAN HEALTH SYSTEMS ANNOUNCES $4.2 BILLION ACQUISITION OF CAREPOINT TECHNOLOGIES, PLANS TO DEPLOY AI-DRIVEN DIAGNOSTICS ACROSS 340 HOSPITALS
+
+Move signals largest healthcare AI deal of the decade; 12,000 CarePoint employees face "organizational restructuring"
+
+SAN FRANCISCO, March 28, 2026 — Meridian Health Systems (NYSE: MHS), the nation's third-largest hospital network, today announced a definitive agreement to acquire CarePoint Technologies, a leading healthcare AI and electronic health records company, for approximately $4.2 billion in cash and stock.
+
+The acquisition, expected to close in Q3 2026 pending regulatory approval, will integrate CarePoint's AI diagnostic platform — branded "CareAI" — into Meridian's network of 340 hospitals and 2,100 outpatient clinics across 28 states. Meridian CEO Dr. Sarah Chen called the deal "the most transformative moment in American healthcare since the introduction of electronic health records."
+
+AI-POWERED DIAGNOSTICS AT SCALE
+
+Under the agreement, Meridian will deploy CarePoint's AI diagnostic tools across its entire network within 18 months. The CareAI platform uses machine learning models trained on over 50 million patient records to assist physicians with early detection of cancers, cardiac conditions, and rare diseases. In clinical trials, CareAI demonstrated a 34% improvement in early-stage cancer detection rates and reduced diagnostic errors by 28%.
+
+"This technology will save thousands of lives every year," said Dr. Chen during a press conference at Meridian's San Francisco headquarters. "We believe AI-assisted diagnostics should be available to every patient, not just those who can afford boutique care."
+
+Dr. James Morrison, CarePoint's founder and Chief Science Officer, will join Meridian's executive team as Chief AI Officer. "Meridian's scale gives us the opportunity to validate our models across the most diverse patient population in the country," Morrison said. "This is what responsible AI deployment looks like."
+
+WORKFORCE IMPACT AND RESTRUCTURING
+
+The announcement has already drawn criticism from healthcare worker unions and patient advocacy groups. Meridian disclosed that the integration will result in "organizational restructuring" affecting approximately 12,000 CarePoint employees, with an estimated 4,500 positions expected to be eliminated over two years.
+
+The National Healthcare Workers Union (NHWU) issued a statement calling the layoffs "unconscionable" and warning that replacing trained medical professionals with AI systems puts patient safety at risk. "You cannot automate empathy," said NHWU president Maria Santos. "Every algorithm has blind spots, and in healthcare, blind spots cost lives."
+
+Meridian responded that affected employees will be offered severance packages, retraining programs, and priority placement within the combined organization. The company emphasized that CareAI is designed to "augment, not replace" clinical decision-making.
+
+FINANCIAL DETAILS AND MARKET REACTION
+
+The transaction values CarePoint at approximately 12x its trailing twelve-month revenue of $350 million. Meridian will fund the acquisition through a combination of $2.8 billion in cash (drawn from existing reserves and a new credit facility) and $1.4 billion in Meridian common stock.
+
+Wall Street analysts offered mixed reactions. Goldman Sachs maintained its "Buy" rating on Meridian, calling the deal "strategically sound but execution-heavy." JPMorgan raised concerns about integration risk, noting that "healthcare AI deployments have a spotty track record, with several high-profile failures in the past three years."
+
+Meridian shares fell 3.2% in after-hours trading following the announcement, while CarePoint's stock surged 18% on the acquisition premium.
+
+REGULATORY AND PRIVACY CONCERNS
+
+The deal is expected to face scrutiny from the Federal Trade Commission (FTC), which has increased oversight of healthcare consolidation. Senator Elizabeth Warren (D-MA) released a statement calling for "rigorous review" of the acquisition, citing concerns about market concentration and patient data privacy.
+
+Privacy advocates have raised questions about CarePoint's AI training data. The Electronic Frontier Foundation (EFF) noted that CareAI's models were trained on patient records from 14 hospital systems, and questioned whether all patients had provided informed consent for their data to be used in AI training. "Patients have a right to know if their most intimate health information is being fed into corporate AI models," said EFF senior counsel David Park.
+
+Meridian and CarePoint stated that all training data was de-identified in compliance with HIPAA regulations and that an independent audit of data practices will be completed before closing.
+
+COMMUNITY IMPACT
+
+Several communities served by Meridian hospitals have expressed concern about the transition. In rural areas, where Meridian operates 47 critical access hospitals, local officials worry that AI-driven cost optimization could lead to service reductions.
+
+Mayor Thomas Rodriguez of Millfield, Ohio — a town of 8,200 where Meridian's hospital is the largest employer — told reporters: "We've heard 'restructuring' before. It usually means our hospital loses another wing and our neighbors lose their jobs. I hope this time is different, but I'm not holding my breath."
+
+Meridian's Chief Operating Officer, Lisa Park, addressed these concerns in a follow-up statement: "We are committed to maintaining services in all communities we currently serve. CareAI will actually enhance our ability to deliver specialist-level diagnostics in rural areas where recruitment of specialists has been challenging."
+
+ABOUT MERIDIAN HEALTH SYSTEMS
+
+Meridian Health Systems is a nonprofit health system headquartered in San Francisco, California, operating 340 hospitals, 2,100 outpatient facilities, and employing over 185,000 healthcare workers. Meridian reported total revenue of $48.3 billion in fiscal year 2025.
+
+ABOUT CAREPOINT TECHNOLOGIES
+
+CarePoint Technologies, founded in 2019 by Dr. James Morrison, is a San Jose-based healthcare technology company specializing in AI-powered diagnostic tools and electronic health record systems. CarePoint serves over 200 healthcare organizations and processes more than 15 million diagnostic consultations annually.
+
+FORWARD-LOOKING STATEMENTS
+
+This press release contains forward-looking statements within the meaning of the Private Securities Litigation Reform Act of 1995. These statements involve risks and uncertainties, and actual results may differ materially from those expressed or implied.
+
+Media Contact:
+Rachel Torres, VP of Communications
+Meridian Health Systems
+press@meridianhealthsystems.com
+(415) 555-0192
+
+Investor Relations:
+Michael Chang, SVP Investor Relations
+ir@meridianhealthsystems.com
+(415) 555-0234
+
+###
