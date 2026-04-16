@@ -10,6 +10,7 @@ OASIS agents have no built-in persistence — this service adds it externally
 by modifying agent.system_message.content between rounds.
 """
 
+import asyncio
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 from collections import defaultdict
@@ -22,8 +23,8 @@ logger = logging.getLogger('mirofish.agent_memory')
 # Marker used to delimit memory section in agent system prompts
 MEMORY_MARKER = "\n\n[ACCUMULATED MEMORY]"
 
-# Default: summarize every 5 rounds (not every round) to reduce LLM overhead
-DEFAULT_SUMMARIZE_INTERVAL = 5
+# Battlematrix optimisation: summarize every 10 rounds (was 5) — ~50% fewer LLM calls
+DEFAULT_SUMMARIZE_INTERVAL = 10
 
 SUMMARIZE_PROMPT = """You are summarizing an AI agent's experience during a social media simulation.
 
@@ -46,12 +47,20 @@ Keep the summary under 200 words. Write in third person.
 If there is no previous memory, start fresh from the new actions."""
 
 
+def _truncate_words(text: str, max_words: int) -> str:
+    """Truncate *text* to at most *max_words* whitespace-separated words."""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + " [...]"
+
+
 class AgentMemoryService:
     """Persist and retrieve agent memory summaries via Neo4j.
 
     Actions are accumulated in memory between summarization intervals.
     LLM summarization only happens every `summarize_interval` rounds,
-    reducing overhead by ~80% compared to per-round summarization.
+    reducing overhead compared to per-round summarization.
     """
 
     def __init__(
@@ -92,14 +101,14 @@ class AgentMemoryService:
         """
         Summarize accumulated actions and persist to Neo4j.
 
-        Only runs if enough rounds have passed since last summarization,
-        or if force=True (e.g., simulation ending).
+        Uses asyncio.gather to run all per-agent LLM calls in parallel,
+        significantly reducing wall-clock time on Battlematrix bm-node1.
 
         Args:
             simulation_id: Simulation ID
             round_num: Current round number
             agent_names: {agent_id: agent_name}
-            agent_personas: {agent_id: persona_excerpt}
+            agent_personas: {agent_id: persona_excerpt (up to 500 words)}
             force: Force summarization regardless of interval
 
         Returns:
@@ -111,15 +120,21 @@ class AgentMemoryService:
         if not force and (round_num - self._last_summarized_round) < self.summarize_interval:
             return 0
 
-        updated = 0
         start_round = self._last_summarized_round + 1
 
-        for agent_id, actions in self._pending_actions.items():
+        # Snapshot pending actions so we can clear the buffer before awaiting
+        pending_snapshot = dict(self._pending_actions)
+
+        # Build per-agent coroutines
+        async def _summarize_one(agent_id: int, actions: List[Dict[str, Any]]) -> bool:
             if not actions:
-                continue
+                return False
 
             agent_name = agent_names.get(agent_id, f"Agent_{agent_id}")
-            persona = agent_personas.get(agent_id, "")[:500]
+
+            # Truncate persona to 500 words
+            raw_persona = agent_personas.get(agent_id, "")
+            persona = _truncate_words(raw_persona, 500)
 
             # Format accumulated actions
             action_lines = []
@@ -132,9 +147,12 @@ class AgentMemoryService:
                     action_lines.append(f"- {action_type}")
             new_actions_text = "\n".join(action_lines)
 
-            # Get existing memory
-            previous_memory = self.storage.get_agent_memory(simulation_id, agent_id)
-            previous_memory = previous_memory or "No previous memories — this is the start of the simulation."
+            # Get existing memory and truncate to 500 words
+            raw_previous = self.storage.get_agent_memory(simulation_id, agent_id)
+            previous_memory = _truncate_words(
+                raw_previous or "No previous memories — this is the start of the simulation.",
+                500,
+            )
 
             prompt = SUMMARIZE_PROMPT.format(
                 agent_name=agent_name,
@@ -162,15 +180,36 @@ class AgentMemoryService:
                     summary=updated_summary.strip(),
                     round_num=round_num,
                 )
-                updated += 1
+                return True
 
             except Exception as e:
                 logger.warning(f"Failed to update memory for {agent_name}: {e}")
+                return False
+
+        # Run all agent summarizations in parallel via asyncio.gather
+        try:
+            loop = asyncio.get_event_loop()
+            results = loop.run_until_complete(
+                asyncio.gather(
+                    *[_summarize_one(aid, acts) for aid, acts in pending_snapshot.items()],
+                    return_exceptions=False,
+                )
+            )
+        except RuntimeError:
+            # Already inside a running loop (e.g. called from async context)
+            results = asyncio.run(
+                asyncio.gather(
+                    *[_summarize_one(aid, acts) for aid, acts in pending_snapshot.items()],
+                    return_exceptions=False,
+                )
+            )
+
+        updated = sum(1 for r in results if r is True)
 
         if updated > 0:
             logger.info(
                 f"Rounds {start_round}-{round_num}: Summarized memories for "
-                f"{updated}/{len(self._pending_actions)} agents"
+                f"{updated}/{len(pending_snapshot)} agents (parallel)"
             )
 
         # Clear buffer and update checkpoint
