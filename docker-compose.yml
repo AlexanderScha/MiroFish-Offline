@@ -1,29 +1,41 @@
+# =============================================================
+# MiroFish-Offline — Battlematrix bm-control
+# =============================================================
+# What runs HERE (bm-control):
+#   - mirofish-offline  (this compose)
+#   - mirofish-neo4j    (already running, external container)
+#   - ollama            (systemd service, *:11434)
+#
+# What runs on bm-node1 (192.168.10.2):
+#   - vLLM              qwen3:32b, TP=8, port 8000
+# =============================================================
+
 services:
   mirofish:
     build: .
-    # Or use pre-built image (when available):
-    # image: ghcr.io/nikmcfly/mirofish-offline:latest
     container_name: mirofish-offline
     env_file:
       - .env
     ports:
-      - "3000:3000"
+      - "3002:3000"   # 3000 occupied by wiki.js
       - "5001:5001"
     restart: unless-stopped
     volumes:
       - ./backend/uploads:/app/backend/uploads
+    extra_hosts:
+      - "host-gateway:host-gateway"  # exposes 172.17.0.1 for Ollama
     depends_on:
       neo4j:
         condition: service_healthy
-      ollama:
-        condition: service_started
 
+  # Neo4j runs as external container (mirofish-neo4j, already healthy)
+  # We define it here only so depends_on health-check works
   neo4j:
     image: neo4j:5.18-community
     container_name: mirofish-neo4j
     ports:
-      - "7474:7474"   # Neo4j Browser
-      - "7687:7687"   # Bolt protocol
+      - "7474:7474"
+      - "7687:7687"
     environment:
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-mirofish}
       - NEO4J_PLUGINS=["apoc"]
@@ -40,23 +52,8 @@ services:
       retries: 10
       start_period: 30s
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: mirofish-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
 volumes:
   neo4j_data:
+    external: true   # already exists on bm-control
   neo4j_logs:
-  ollama_data:
+    external: true   # already exists on bm-control
