@@ -3,8 +3,8 @@
 # =============================================================
 # What runs HERE (bm-control):
 #   - mirofish-offline  (this compose)
-#   - mirofish-neo4j    (already running, external container)
-#   - ollama            (systemd service, *:11434)
+#   - mirofish-neo4j    (external container, network: mirofish-offline-main_default)
+#   - ollama            (systemd service, *:11434 -> 172.17.0.1)
 #
 # What runs on bm-node1 (192.168.10.2):
 #   - vLLM              qwen3:32b, TP=8, port 8000
@@ -24,36 +24,12 @@ services:
       - ./backend/uploads:/app/backend/uploads
     extra_hosts:
       - "host-gateway:host-gateway"
-    depends_on:
-      neo4j:
-        condition: service_healthy
+    networks:
+      - default
+      - neo4j_net
 
-  neo4j:
-    image: neo4j:5.18-community
-    container_name: mirofish-neo4j
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-mirofish}
-      - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_server_memory_heap_initial__size=512m
-      - NEO4J_server_memory_heap_max__size=2g
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-volumes:
-  neo4j_data:
+networks:
+  default: {}
+  neo4j_net:
     external: true
-    name: mirofish-offline-main_neo4j_data
-  neo4j_logs:
-    external: true
-    name: mirofish-offline-main_neo4j_logs
+    name: mirofish-offline-main_default
