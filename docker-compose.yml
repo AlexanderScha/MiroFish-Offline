@@ -23,13 +23,11 @@ services:
     volumes:
       - ./backend/uploads:/app/backend/uploads
     extra_hosts:
-      - "host-gateway:host-gateway"  # exposes 172.17.0.1 for Ollama
+      - "host-gateway:host-gateway"
     depends_on:
       neo4j:
         condition: service_healthy
 
-  # Neo4j runs as external container (mirofish-neo4j, already healthy)
-  # We define it here only so depends_on health-check works
   neo4j:
     image: neo4j:5.18-community
     container_name: mirofish-neo4j
@@ -54,6 +52,8 @@ services:
 
 volumes:
   neo4j_data:
-    external: true   # already exists on bm-control
+    external: true
+    name: mirofish-offline-main_neo4j_data
   neo4j_logs:
-    external: true   # already exists on bm-control
+    external: true
+    name: mirofish-offline-main_neo4j_logs
